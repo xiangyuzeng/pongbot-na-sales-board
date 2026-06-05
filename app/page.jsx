@@ -1,0 +1,497 @@
+"use client";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { modules, QTYPE } from "./data";
+
+const allCards = [];
+const cardMap = {};
+modules.forEach((mod) => {
+  mod.cards.forEach((c) => {
+    const entry = { ...c, modId: mod.id, modName: mod.name, modColor: mod.color, modIcon: mod.icon };
+    allCards.push(entry);
+    cardMap[c.id] = entry;
+  });
+});
+
+function qt(t) { return QTYPE[t] || QTYPE.B; }
+
+export default function Board() {
+  const [sel, setSel] = useState(null);
+  const [done, setDone] = useState({});
+  const [q, setQ] = useState("");
+  const [modF, setModF] = useState("all");
+  const [typeF, setTypeF] = useState("all");
+  const [collapsed, setCollapsed] = useState({});
+  const [showStats, setShowStats] = useState(false);
+  const [undone, setUndone] = useState(false);
+
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    try { const s = localStorage.getItem("pongbot-na-sales-done"); if (s) setDone(JSON.parse(s)); } catch {}
+    setHydrated(true);
+  }, []);
+  useEffect(() => {
+    if (!hydrated) return;
+    try { localStorage.setItem("pongbot-na-sales-done", JSON.stringify(done)); } catch {}
+  }, [done, hydrated]);
+
+  const total = allCards.length;
+  const doneN = Object.keys(done).length;
+  const pct = total > 0 ? Math.round((doneN / total) * 100) : 0;
+
+  const toggle = useCallback((id) => {
+    setDone((p) => { const n = { ...p }; if (n[id]) delete n[id]; else n[id] = 1; return n; });
+  }, []);
+  const togMod = useCallback((id) => {
+    setCollapsed((p) => { const n = { ...p }; if (n[id]) delete n[id]; else n[id] = 1; return n; });
+  }, []);
+
+  const { matchCards, titleHits } = useMemo(() => {
+    const ql = q.toLowerCase();
+    const m = new Set();
+    const th = new Set();
+    allCards.forEach((c) => {
+      if (modF !== "all" && c.modId !== modF) return;
+      if (typeF !== "all" && c.qtype !== typeF) return;
+      if (undone && done[c.id]) return;
+      if (ql) {
+        const titleMatch = c.title.toLowerCase().includes(ql);
+        const answerMatch = c.answer.toLowerCase().includes(ql);
+        if (!titleMatch && !answerMatch) return;
+        if (titleMatch) th.add(c.id);
+      }
+      m.add(c.id);
+    });
+    return { matchCards: m, titleHits: th };
+  }, [q, modF, typeF, undone, done]);
+
+  const visMods = useMemo(() => {
+    return modules.map((mod) => {
+      let visCards = mod.cards.filter((c) => matchCards.has(c.id));
+      if (visCards.length === 0) return null;
+      if (q && titleHits.size > 0) {
+        visCards = [...visCards].sort((a, b) => {
+          const aHit = titleHits.has(a.id) ? 0 : 1;
+          const bHit = titleHits.has(b.id) ? 0 : 1;
+          return aHit - bHit;
+        });
+      }
+      return { ...mod, visCards };
+    }).filter(Boolean);
+  }, [matchCards, titleHits, q]);
+
+  const openCard = (id) => { const c = cardMap[id]; if (c) setSel(c); };
+  const navCard = (dir) => {
+    if (!sel) return;
+    const flat = [];
+    visMods.forEach((m) => m.visCards.forEach((c) => flat.push(c.id)));
+    const i = flat.indexOf(sel.id);
+    if (i < 0) return;
+    const ni = dir === 1 ? (i + 1) % flat.length : (i - 1 + flat.length) % flat.length;
+    openCard(flat[ni]);
+  };
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (!sel) return;
+      if (e.key === "ArrowLeft") navCard(-1);
+      if (e.key === "ArrowRight") navCard(1);
+      if (e.key === "Escape") setSel(null);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });
+
+  const readMin = (cc) => Math.max(1, Math.ceil(cc / 280));
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#F5F5F0", color: "#1a1a1a", fontFamily: "'Noto Sans SC', -apple-system, sans-serif" }}>
+      <header style={{ position: "sticky", top: 0, zIndex: 40, background: "rgba(255,255,255,0.95)", backdropFilter: "blur(16px)", borderBottom: "1px solid #e0e0e0", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "14px 20px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <h1 style={{ margin: 0, fontSize: 20, fontWeight: 900, letterSpacing: -0.5, color: "#1D4ED8" }}>
+                PONGBOT 北美销售负责人 · 面试答题板
+              </h1>
+              <p style={{ margin: "3px 0 0", fontSize: 11, color: "#888", letterSpacing: 0.5 }}>
+                {total}题 · {modules.length}模块 · 市场速查 · 产品/赛道 · STAR行为 · 销售打法 · 反问
+              </p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 120, height: 6, borderRadius: 3, background: "#e8e8e4", overflow: "hidden" }}>
+                <div style={{ height: "100%", borderRadius: 3, background: pct === 100 ? "#2E7D32" : "#1D4ED8", width: pct + "%", transition: "width 0.5s ease" }} />
+              </div>
+              <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: pct === 100 ? "#2E7D32" : "#1D4ED8" }}>
+                {doneN}/{total}
+              </span>
+              <button onClick={() => setShowStats(!showStats)} style={{ padding: "3px 8px", borderRadius: 6, border: "1px solid #ddd", background: showStats ? "#DBEAFE" : "#fff", color: showStats ? "#1D4ED8" : "#888", fontSize: 11, cursor: "pointer" }}>📊</button>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            <div style={{ position: "relative", flex: "1 1 160px", minWidth: 140 }}>
+              <input type="text" placeholder="搜索题目关键词..." value={q} onChange={(e) => setQ(e.target.value)}
+                style={{ width: "100%", padding: "6px 28px 6px 30px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", color: "#1a1a1a", fontSize: 12, outline: "none" }} />
+              <span style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", fontSize: 12, opacity: 0.4 }}>🔍</span>
+              {q && <button onClick={() => setQ("")} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#999", cursor: "pointer", fontSize: 11 }}>✕</button>}
+            </div>
+            <div style={{ display: "flex", gap: 3, overflowX: "auto", flexShrink: 0 }}>
+              <Chip active={modF === "all"} onClick={() => setModF("all")} color="#666">全部</Chip>
+              {modules.map((m) => (
+                <Chip key={m.id} active={modF === m.id} onClick={() => setModF(modF === m.id ? "all" : m.id)} color={m.color}>
+                  {m.icon}{m.name.slice(0, 4)}
+                </Chip>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+              {Object.entries(QTYPE).map(([k, v]) => (
+                <Chip key={k} active={typeF === k} onClick={() => setTypeF(typeF === k ? "all" : k)} color={v.color}>
+                  {v.icon}{v.desc}
+                </Chip>
+              ))}
+            </div>
+            <Chip active={undone} onClick={() => setUndone(!undone)} color="#1565C0">{undone ? "📖未学" : "📖全部"}</Chip>
+            <span style={{ fontSize: 11, color: "#888", fontFamily: "'JetBrains Mono', monospace" }}>{matchCards.size}题</span>
+          </div>
+        </div>
+        {showStats && (
+          <div style={{ maxWidth: 1400, margin: "0 auto", padding: "8px 20px 10px", borderTop: "1px solid #eee" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+              {modules.map((mod) => {
+                const t = mod.cards.length;
+                const d = mod.cards.filter((c) => done[c.id]).length;
+                const p = t > 0 ? Math.round((d / t) * 100) : 0;
+                return (
+                  <div key={mod.id} onClick={() => setModF(mod.id)} style={{ cursor: "pointer", textAlign: "center", padding: "8px 6px", borderRadius: 10, background: "#fff", border: modF === mod.id ? "2px solid " + mod.color : "1px solid #eee", transition: "all 0.2s" }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: mod.color }}>{d}/{t}</div>
+                    <div style={{ width: "100%", height: 3, borderRadius: 2, background: "#eee", marginTop: 4 }}>
+                      <div style={{ height: "100%", borderRadius: 2, background: mod.color, width: p + "%", transition: "width 0.3s" }} />
+                    </div>
+                    <div style={{ fontSize: 9, marginTop: 3, color: "#888", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{mod.icon} {mod.name}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </header>
+
+      <main style={{ maxWidth: 1400, margin: "0 auto", padding: "16px 20px 60px" }}>
+        {visMods.map((mod) => {
+          const isCollapsed = collapsed[mod.id];
+          const modDone = mod.visCards.filter((c) => done[c.id]).length;
+          return (
+            <section key={mod.id} style={{ marginBottom: 24 }}>
+              <button onClick={() => togMod(mod.id)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 14, background: "#fff", border: "1px solid #e8e8e4", cursor: "pointer", textAlign: "left", transition: "all 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}
+                onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.08)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; }}>
+                <span style={{ fontSize: 9, color: "#999", transition: "transform 0.2s", transform: isCollapsed ? "rotate(0)" : "rotate(90deg)" }}>▶</span>
+                <span style={{ width: 4, height: 28, borderRadius: 2, background: mod.color, flexShrink: 0 }} />
+                <span style={{ fontSize: 22 }}>{mod.icon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#1a1a1a" }}>{mod.name}</div>
+                  <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>{mod.description}</div>
+                </div>
+                <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: modDone === mod.visCards.length && modDone > 0 ? "#2E7D32" : "#999", fontWeight: 600 }}>{modDone}/{mod.visCards.length}</span>
+                <div style={{ width: 52, height: 4, borderRadius: 2, background: "#e8e8e4" }}>
+                  <div style={{ height: "100%", borderRadius: 2, background: modDone === mod.visCards.length && modDone > 0 ? "#2E7D32" : mod.color, width: (mod.visCards.length > 0 ? (modDone / mod.visCards.length * 100) : 0) + "%", transition: "width 0.3s" }} />
+                </div>
+              </button>
+              {!isCollapsed && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 10, marginTop: 10, paddingLeft: 16 }}>
+                  {mod.visCards.map((c) => {
+                    const isDone = !!done[c.id];
+                    const qInfo = qt(c.qtype);
+                    return (
+                      <div key={c.id} onClick={() => openCard(c.id)}
+                        style={{ cursor: "pointer", background: "#fff", borderRadius: 12, border: "1px solid " + (isDone ? "#A5D6A7" : "#e8e8e4"), borderLeft: "3px solid " + (isDone ? "#2E7D32" : mod.color), padding: "14px 16px", transition: "all 0.2s", position: "relative" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 8px 24px " + mod.color + "18"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                            <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: qInfo.bg, color: qInfo.color, fontWeight: 600 }}>{qInfo.icon} {qInfo.desc}</span>
+                            <span style={{ fontSize: 10, fontFamily: "'JetBrains Mono', monospace", color: "#bbb" }}>Q{c.num}</span>
+                          </div>
+                          <button onClick={(e) => { e.stopPropagation(); toggle(c.id); }}
+                            style={{ width: 20, height: 20, borderRadius: 10, border: "2px solid " + (isDone ? "#2E7D32" : "#ddd"), background: isDone ? "#E8F5E9" : "transparent", color: isDone ? "#2E7D32" : "transparent", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.2s" }}>
+                            {isDone ? "✓" : ""}
+                          </button>
+                        </div>
+                        <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, lineHeight: 1.55, color: "#2a2a2a" }}>
+                          {q && titleHits.has(c.id) ? highlightText(c.title, q) : c.title}
+                        </h3>
+                        {q && titleHits.has(c.id) && (
+                          <span style={{ display: "inline-block", marginTop: 4, fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "#FFF8E1", color: "#F57F17", fontWeight: 600 }}>标题匹配</span>
+                        )}
+                        <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: 10, color: "#bbb", fontFamily: "'JetBrains Mono', monospace" }}>{c.charCount}字 · ~{readMin(c.charCount)}分钟</span>
+                          <span style={{ fontSize: 10, color: mod.color, opacity: 0, transition: "opacity 0.2s" }} className="view-hint">查看答案 →</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          );
+        })}
+        {visMods.length === 0 && (
+          <div style={{ textAlign: "center", padding: "60px 0" }}>
+            <p style={{ color: "#999", fontSize: 14 }}>🔍 没有匹配的题目</p>
+            <button onClick={() => { setQ(""); setModF("all"); setTypeF("all"); setUndone(false); }}
+              style={{ marginTop: 8, fontSize: 12, color: "#1D4ED8", background: "none", border: "none", textDecoration: "underline", cursor: "pointer" }}>清除筛选</button>
+          </div>
+        )}
+      </main>
+
+      {sel && (
+        <div onClick={(e) => { if (e.target === e.currentTarget) setSel(null); }}
+          style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 12, background: "rgba(0,0,0,0.35)", backdropFilter: "blur(6px)" }}>
+          <div style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 820, maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", border: "1px solid #e0e0e0", boxShadow: "0 24px 64px rgba(0,0,0,0.15)", animation: "modalIn 0.25s ease-out" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #eee", flexShrink: 0, background: "#FAFAF8" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: qt(sel.qtype).bg, color: qt(sel.qtype).color, fontWeight: 600 }}>{qt(sel.qtype).icon} {qt(sel.qtype).label}</span>
+                  <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: sel.modColor + "12", color: sel.modColor, fontWeight: 500 }}>{sel.modIcon} {sel.modName}</span>
+                  <span style={{ fontSize: 10, color: "#999", fontFamily: "'JetBrains Mono', monospace" }}>Q{sel.num} · {sel.charCount}字 · ~{readMin(sel.charCount)}分钟</span>
+                </div>
+                <button onClick={() => setSel(null)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid #ddd", background: "#fff", color: "#999", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+              </div>
+              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, lineHeight: 1.5, color: "#1a1a1a" }}>{sel.title}</h2>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", background: "#fff" }}>
+              {renderAnswer(sel.answer, sel.modColor)}
+            </div>
+            <div style={{ padding: "12px 20px", borderTop: "1px solid #eee", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, background: "#FAFAF8" }}>
+              <button onClick={() => toggle(sel.id)}
+                style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: done[sel.id] ? "#E8F5E9" : "#f5f5f0", color: done[sel.id] ? "#2E7D32" : "#888", fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}>
+                {done[sel.id] ? "✓ 已复习" : "○ 标记已复习"}
+              </button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <NavBtn onClick={() => navCard(-1)}>← 上一题</NavBtn>
+                <NavBtn onClick={() => navCard(1)}>下一题 →</NavBtn>
+                <button onClick={() => setSel(null)} style={{ padding: "7px 18px", borderRadius: 8, border: "none", background: sel.modColor, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>关闭</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <footer style={{ textAlign: "center", padding: "20px", borderTop: "1px solid #e8e8e4" }}>
+        <p style={{ fontSize: 10, color: "#bbb", lineHeight: 1.6 }}>
+          {total}题 · {modules.length}模块 · 行为·产品/市场·销售·反问全覆盖<br/>核心原则: 诚实应对差距 · 数据驱动 · 手-眼-脑平台 · 自有品牌为主 · 复利式客户关系
+        </p>
+      </footer>
+
+      <style jsx global>{`
+        * { box-sizing: border-box; margin: 0; }
+        body { margin: 0; -webkit-font-smoothing: antialiased; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #aaa; }
+        @keyframes modalIn { from { transform: translateY(16px) scale(0.97); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+        div:hover > .view-hint { opacity: 1 !important; }
+      `}</style>
+    </div>
+  );
+}
+
+// Compact answer renderer.
+// Each \n\n paragraph -> a block. Within a block, consecutive bullet lines collapse into
+// a tight bulleted list; consecutive short "label: value" lines collapse into a definition
+// grid; numbered headings (一、 / 第一， / 1.) become section headers; long sentences
+// stay as plain paragraphs.
+function renderAnswer(answer, modColor) {
+  // Flatten all non-empty lines into a single stream so consecutive list-style
+  // lines can group regardless of whether they were separated by \n or \n\n.
+  const lines = answer.split(/\n+/).map(l => l.trim()).filter(Boolean);
+  return <div>{renderBlock(lines, modColor)}</div>;
+}
+
+function renderBlock(lines, modColor) {
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const t = lines[i];
+
+    // Heading variants: 【...】, 第N阶段/步/层, Phase N, 一、/二、, ⚠️ banners
+    if (/^【⚠️/.test(t)) {
+      out.push(<div key={i} style={{ fontSize: 13.5, fontWeight: 700, color: "#B71C1C", margin: "6px 0 2px", borderLeft: "3px solid #E53935", padding: "5px 10px", background: "#FFF8E1", borderRadius: "0 6px 6px 0" }}>{t}</div>);
+      i++; continue;
+    }
+    if (/^【/.test(t)) {
+      out.push(<div key={i} style={{ fontSize: 13.5, fontWeight: 700, color: modColor, margin: "8px 0 2px", borderLeft: "3px solid " + modColor, paddingLeft: 8 }}>{t}</div>);
+      i++; continue;
+    }
+    if (/^第[一二三四五六七八九十百0-9]+(阶段|步|层|轮|个|周|月|年|阶|条|点)/.test(t) ||
+        /^Phase\s/i.test(t) ||
+        /^[一二三四五六七八九十]+[、,，]/.test(t) ||
+        /^[一二三四五六七八九十]+\.[^0-9]/.test(t)) {
+      out.push(<div key={i} style={{ fontSize: 13, fontWeight: 700, color: modColor, margin: "6px 0 2px" }}>{t}</div>);
+      i++; continue;
+    }
+
+    // Markdown table: consecutive lines starting and ending with |
+    // First row = header, optional separator row | --- | is skipped, rest = body.
+    if (/^\|.+\|$/.test(t)) {
+      const rows = [];
+      while (i < lines.length && /^\|.+\|$/.test(lines[i])) {
+        const raw = lines[i].slice(1, -1);
+        const cells = raw.split('|').map(c => c.trim());
+        // Skip markdown separator rows like | --- | --- |
+        const isSep = cells.every(c => /^:?-+:?$/.test(c));
+        if (!isSep) rows.push(cells);
+        i++;
+      }
+      if (rows.length >= 2) {
+        const [header, ...body] = rows;
+        out.push(
+          <table key={"t"+i} style={{ borderCollapse: "collapse", margin: "4px 0 8px", fontSize: 12.5, width: "100%", tableLayout: "auto" }}>
+            <thead>
+              <tr>{header.map((h, idx) => (
+                <th key={idx} style={{ textAlign: "left", padding: "5px 8px", borderBottom: "2px solid " + modColor, color: modColor, fontWeight: 600, whiteSpace: "nowrap", background: modColor + "08" }}>{h}</th>
+              ))}</tr>
+            </thead>
+            <tbody>
+              {body.map((r, ri) => (
+                <tr key={ri} style={{ borderBottom: "1px solid #eee" }}>
+                  {r.map((c, ci) => (
+                    <td key={ci} style={{ padding: "5px 8px", color: "#444", verticalAlign: "top", lineHeight: 1.45 }}>{c}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+        continue;
+      }
+    }
+
+    // Bullet group (consecutive · - – • ► lines collapse into a tight list).
+    if (/^[•·\-–►]/.test(t)) {
+      const items = [];
+      while (i < lines.length && /^[•·\-–►]/.test(lines[i])) {
+        items.push(lines[i].replace(/^[•·\-–►]\s*/, ''));
+        i++;
+      }
+      out.push(
+        <ul key={"u"+i} style={{ margin: "2px 0 4px", paddingLeft: 16, listStyle: "none" }}>
+          {items.map((it, idx) => (
+            <li key={idx} style={{ fontSize: 13, lineHeight: 1.55, color: "#444", padding: "0", position: "relative" }}>
+              <span style={{ position: "absolute", left: -10, top: 0, color: modColor, fontWeight: 700 }}>·</span>
+              {renderInline(it, modColor)}
+            </li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    // Numbered list / "第N，..." / "1." / "1、" etc — treat as a sub-bullet group when
+    // 2+ short consecutive lines, otherwise just a heading-style line.
+    if (/^[0-9]+[.、)]/.test(t) || /^第[一二三四五六七八九十0-9]+[，,]/.test(t)) {
+      const items = [];
+      while (i < lines.length && (/^[0-9]+[.、)]/.test(lines[i]) || /^第[一二三四五六七八九十0-9]+[，,]/.test(lines[i]))) {
+        items.push(lines[i]);
+        i++;
+      }
+      const allShort = items.every(s => s.length <= 60);
+      if (items.length >= 2 && allShort) {
+        out.push(
+          <ol key={"o"+i} style={{ margin: "2px 0 4px", paddingLeft: 20, listStyle: "decimal" }}>
+            {items.map((it, idx) => (
+              <li key={idx} style={{ fontSize: 13, lineHeight: 1.55, color: "#333", padding: "0" }}>
+                {renderInline(it.replace(/^[0-9]+[.、)]\s*/, '').replace(/^第[一二三四五六七八九十0-9]+[，,]\s*/, ''), modColor)}
+              </li>
+            ))}
+          </ol>
+        );
+      } else {
+        items.forEach((it, idx) => out.push(
+          <p key={"n"+i+"-"+idx} style={{ fontSize: 13, lineHeight: 1.6, color: "#333", margin: "2px 0", fontWeight: 500 }}>{renderInline(it, modColor)}</p>
+        ));
+      }
+      continue;
+    }
+
+    // Definition grid: 2+ consecutive lines of "Label：value" with short label.
+    const isDef = (s) => {
+      const m = s.match(/^([^：:]{1,18})[：:](.+)$/);
+      return !!m;
+    };
+    if (isDef(t)) {
+      const rows = [];
+      while (i < lines.length && isDef(lines[i]) && !/^[•·\-–►【]/.test(lines[i])) {
+        const m = lines[i].match(/^([^：:]{1,18})[：:](.+)$/);
+        rows.push([m[1].trim(), m[2].trim()]);
+        i++;
+      }
+      if (rows.length >= 2) {
+        out.push(
+          <div key={"d"+i} style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 8, rowGap: 2, margin: "2px 0 4px" }}>
+            {rows.flatMap((r, idx) => [
+              <div key={"k"+idx} style={{ fontSize: 13, color: modColor, fontWeight: 600, whiteSpace: "nowrap" }}>{r[0]}：</div>,
+              <div key={"v"+idx} style={{ fontSize: 13, color: "#444", lineHeight: 1.55 }}>{renderInline(r[1], modColor)}</div>,
+            ])}
+          </div>
+        );
+        continue;
+      }
+      // Single label line: render inline-styled.
+      // (i has already been advanced past this line by the while loop above — do NOT i++ again.)
+      out.push(
+        <p key={"sl"+i} style={{ fontSize: 13, lineHeight: 1.6, color: "#444", margin: "2px 0" }}>
+          <span style={{ color: modColor, fontWeight: 600 }}>{t.split(/[：:]/)[0]}：</span>
+          {t.split(/[：:]/).slice(1).join('：')}
+        </p>
+      );
+      continue;
+    }
+
+    // Plain paragraph
+    out.push(<p key={i} style={{ fontSize: 13, lineHeight: 1.65, color: "#444", margin: "3px 0" }}>{renderInline(t, modColor)}</p>);
+    i++;
+  }
+  return out;
+}
+
+// Bold inline emphasis: bold the leading clause before the first period if it ends in 。
+// Currently a passthrough — kept as a hook for future inline highlights.
+function renderInline(text, _modColor) {
+  return text;
+}
+
+function highlightText(text, query) {
+  if (!query) return text;
+  const ql = query.toLowerCase();
+  const idx = text.toLowerCase().indexOf(ql);
+  if (idx === -1) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark style={{ background: "#FFF176", borderRadius: 2, padding: "0 1px" }}>{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
+function Chip({ children, active, onClick, color }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: "3px 8px", borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+      border: active ? "1px solid " + color : "1px solid #e0e0e0",
+      background: active ? color + "14" : "#fff",
+      color: active ? color : "#999",
+      transition: "all 0.15s"
+    }}>{children}</button>
+  );
+}
+
+function NavBtn({ children, onClick }) {
+  return (
+    <button onClick={onClick} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: 12, cursor: "pointer", transition: "all 0.15s" }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "#f5f5f0"; e.currentTarget.style.color = "#333"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "#666"; }}>
+      {children}
+    </button>
+  );
+}
